@@ -1,9 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHmac, generateKeyPairSync, verify } from 'node:crypto';
+import { generateKeyPairSync, verify } from 'node:crypto';
 import worker, { Tracker } from '../src/worker.js';
 import { parseReply, localParts, prompt, replyDate, countRows, sheetSerial } from '../src/core.js';
-import { twilioSignature, serviceAssertion } from '../src/security.js';
+import { serviceAssertion } from '../src/security.js';
 import { Sheets } from '../src/sheets.js';
 
 test('accept exactly three yes/no answers and optional valid correction date', () => {
@@ -22,7 +22,7 @@ test('9:30 pm Detroit scheduling in winter, summer and DST transition evenings',
   assert.notEqual(localParts('2026-01-14T01:30:00Z').time, '21:30');
 });
 
-test('daily prompt fits in one ASCII SMS segment', () => {
+test('daily prompt keeps all three questions and one reply instruction', () => {
   const text = prompt('2026-10-13');
   assert.ok(text.length <= 160);
   assert.match(text, /^[\x00-\x7f]*$/);
@@ -52,14 +52,10 @@ test('annual counts support all habit combinations and exclude unanswered days',
   assert.equal(countRows(rows, 2026), 2);
 });
 
-test('Twilio signature matches an independent HMAC and forged requests are rejected', async () => {
-  const env = { TWILIO_AUTH_TOKEN: 'test', PUBLIC_URL: 'https://example.com', RECIPIENT_PHONE: '+15555550123',
-    TWILIO_PHONE_NUMBER: '+15555550124', TWILIO_ACCOUNT_SID: 'ACtest' };
-  const params = new URLSearchParams({ From: env.RECIPIENT_PHONE, To: env.TWILIO_PHONE_NUMBER, AccountSid: env.TWILIO_ACCOUNT_SID, Body: 'Y Y N' });
-  const input = 'https://example.com/sms' + [...params.keys()].sort().map(k => k + params.get(k)).join('');
-  assert.equal(await twilioSignature('https://example.com/sms', params, 'test'), createHmac('sha1', 'test').update(input).digest('base64'));
-  const request = new Request('https://example.com/sms', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': 'forged' }, body: params });
-  assert.equal((await worker.fetch(request, env)).status, 403);
+test('forged Telegram webhooks and unprotected admin requests are rejected', async () => {
+  const request = new Request('https://example.com/telegram', { method: 'POST',
+    headers: { 'X-Telegram-Bot-Api-Secret-Token': 'forged' }, body: '{}' });
+  assert.equal((await worker.fetch(request, { TELEGRAM_WEBHOOK_SECRET: 'test' })).status, 403);
   assert.equal((await worker.fetch(new Request('https://example.com/admin/status'), {})).status, 403);
 });
 
@@ -82,9 +78,9 @@ function fixture() {
     async list({ prefix, startAfter, limit }) { return new Map([...data].filter(([k]) => k.startsWith(prefix) && (!startAfter || k > startAfter)).sort(([a], [b]) => a.localeCompare(b)).slice(0, limit).map(([k,v]) => [k, structuredClone(v)])); },
     async setAlarm(time) { alarm = time; }, async deleteAlarm() { alarm = undefined; },
   };
-  const tracker = new Tracker({ storage }, { ENABLED: 'true', RECIPIENT_PHONE: '+15555550123', TWILIO_ACCOUNT_SID: 'ACtest',
-    TWILIO_AUTH_TOKEN: 'test', TWILIO_PHONE_NUMBER: '+15555550124', SHEET_ID: 'sheet', SHEET_TAB: 'Daily Log',
+  const tracker = new Tracker({ storage }, { ENABLED: 'true', TELEGRAM_BOT_TOKEN: 'test', TELEGRAM_PAIRING_CODE: 'pair-secret', SHEET_ID: 'sheet', SHEET_TAB: 'Daily Log',
     GOOGLE_SERVICE_ACCOUNT_EMAIL: 'test', GOOGLE_PRIVATE_KEY: 'test', PUBLIC_URL: 'https://example.com' });
+  data.set('telegramChatId', 123);
   const writes = [];
   tracker.sheets = { rows: async () => [], upsert: async record => { writes.push(structuredClone(record)); } };
   return { tracker, storage, writes, get alarm() { return alarm; } };
@@ -92,7 +88,7 @@ function fixture() {
 
 test('daily send claims survive restart and duplicate concurrent ticks send once', async () => {
   const f = fixture(); const original = globalThis.fetch; let sent = 0;
-  globalThis.fetch = async () => { sent++; return Response.json({ sid: 'SMout' }); };
+  globalThis.fetch = async () => { sent++; return Response.json({ ok: true, result: { message_id: 10 } }); };
   try {
     const req = () => new Request('https://internal/tick', { method: 'POST', body: JSON.stringify({ date: '2026-10-13', due: true }) });
     await Promise.all([f.tracker.fetch(req()), f.tracker.fetch(req())]);
@@ -106,7 +102,7 @@ test('daily send claims survive restart and duplicate concurrent ticks send once
 test('replies survive Sheet outage, retry once, and allow correction without duplicate rows', async () => {
   const f = fixture();
   await f.storage.put('day:2026-10-13', { date: '2026-10-13', promptedAt: '2026-10-14T01:30:00Z', status: 'Awaiting response' });
-  const input = { body: 'Y Y N', id: 'SM' + 'a'.repeat(32), now: Date.parse('2026-10-14T05:00:00Z') };
+  const input = { body: 'Y Y N', id: 'TG:123:1', now: Date.parse('2026-10-14T05:00:00Z') };
   await f.tracker.reply(input);
   f.tracker.sheets.upsert = async () => { throw new Error('outage'); };
   await f.tracker.alarm(); assert.ok(f.alarm);
@@ -114,19 +110,19 @@ test('replies survive Sheet outage, retry once, and allow correction without dup
   f.tracker.sheets.upsert = async r => f.writes.push(structuredClone(r));
   await f.tracker.reply(input); await f.tracker.sync();
   assert.equal(f.writes.length, 1); assert.equal(f.alarm, undefined);
-  await f.tracker.reply({ ...input, body: 'Y N Y', id: 'SM' + 'b'.repeat(32) }); await f.tracker.sync();
+  await f.tracker.reply({ ...input, body: 'Y N Y', id: 'TG:123:2' }); await f.tracker.sync();
   assert.deepEqual(f.writes[1].answers, ['Yes', 'No', 'Yes']);
 });
 
 test('invalid replies preserve previous valid answers; STOP pauses future sends', async () => {
   const f = fixture(); const date = '2026-10-13'; const now = Date.parse('2026-10-14T05:00:00Z');
   await f.storage.put(`day:${date}`, { date, promptedAt: '2026-10-14T01:30:00Z', status: 'Awaiting response' });
-  await f.tracker.reply({ body: 'maybe', id: 'SM' + 'a'.repeat(32), now });
+  await f.tracker.reply({ body: 'maybe', id: 'TG:123:1', now });
   assert.equal((await f.storage.get(`day:${date}`)).status, 'Invalid response');
-  await f.tracker.reply({ body: 'yes no yes', id: 'SM' + 'b'.repeat(32), now });
-  await f.tracker.reply({ body: 'bad reply', id: 'SM' + 'c'.repeat(32), now });
+  await f.tracker.reply({ body: 'yes no yes', id: 'TG:123:2', now });
+  await f.tracker.reply({ body: 'bad reply', id: 'TG:123:3', now });
   assert.equal((await f.storage.get(`day:${date}`)).status, 'Complete');
-  await f.tracker.reply({ body: 'STOP', id: 'SM' + 'd'.repeat(32), now });
+  await f.tracker.reply({ body: 'STOP', id: 'TG:123:4', now });
   await f.tracker.tick({ date: '2026-10-14', due: true });
   assert.equal((await f.storage.get('day:2026-10-14')).status, 'Paused');
 });
@@ -156,28 +152,53 @@ test('Sheet upsert updates existing date and appends new date using RAW values',
   assert.match(requests[3].url, /valueInputOption=RAW/);
 });
 
-test('signed inbound webhook returns empty TwiML, so it sends no confirmation SMS', async () => {
-  const env = { TWILIO_AUTH_TOKEN: 'test', PUBLIC_URL: 'https://example.com', RECIPIENT_PHONE: '+15555550123',
-    TWILIO_PHONE_NUMBER: '+15555550124', TWILIO_ACCOUNT_SID: 'ACtest' };
+test('authenticated webhook forwards update and sends no confirmation message', async () => {
   let forwarded;
-  env.TRACKER = { idFromName: x => x, get: () => ({ fetch: async (url, init) => { forwarded = JSON.parse(init.body); return Response.json({ ok: true }); } }) };
-  const params = new URLSearchParams({ From: env.RECIPIENT_PHONE, To: env.TWILIO_PHONE_NUMBER, AccountSid: env.TWILIO_ACCOUNT_SID,
-    Body: 'Y Y N', MessageSid: 'SM' + 'a'.repeat(32) });
-  const signature = await twilioSignature('https://example.com/sms', params, 'test');
-  const response = await worker.fetch(new Request('https://example.com/sms', { method: 'POST', body: params,
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-Twilio-Signature': signature } }), env);
-  assert.equal(await response.text(), '<Response/>');
-  assert.equal(forwarded.body, 'Y Y N');
+  const env = { TELEGRAM_WEBHOOK_SECRET: 'test', TRACKER: { idFromName: x => x,
+    get: () => ({ fetch: async (url, init) => { forwarded = JSON.parse(init.body); return Response.json({ ok: true }); } }) } };
+  const update = { update_id: 1, message: { text: 'Y Y N' } };
+  const response = await worker.fetch(new Request('https://example.com/telegram', { method: 'POST',
+    body: JSON.stringify(update), headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test' } }), env);
+  assert.deepEqual(await response.json(), { ok: true });
+  assert.deepEqual(forwarded, update);
 });
 
-test('later carrier delivery failure changes awaiting row, preserving completed answers', async () => {
-  const f = fixture(); const record = { date: '2026-10-13', promptedAt: '2026-10-14T01:30:00Z', outgoingId: 'SMout', status: 'Awaiting response' };
-  await f.storage.put('day:2026-10-13', record);
-  await f.tracker.delivery({ id: 'SMout', status: 'undelivered' });
-  assert.equal((await f.storage.get('day:2026-10-13')).status, 'Send failed');
-  await f.tracker.reply({ body: 'Y N Y', id: 'SM' + 'a'.repeat(32), now: Date.parse('2026-10-14T05:00:00Z') });
-  await f.tracker.delivery({ id: 'SMout', status: 'failed' });
-  assert.equal((await f.storage.get('day:2026-10-13')).status, 'Complete');
+test('pairing requires secret code, accepts only private owner and rejects other chats', async () => {
+  const f = fixture(); await f.storage.put('telegramChatId', undefined);
+  const message = (text, chat = 123, type = 'private') => ({ update_id: 1,
+    message: { message_id: 1, text, chat: { id: chat, type }, from: { id: chat, is_bot: false } } });
+  await f.tracker.update(message('/start wrong'));
+  await f.tracker.update(message('/start pair-secret', 123, 'group'));
+  assert.equal(await f.storage.get('telegramChatId'), undefined);
+  const original = globalThis.fetch; let sent = 0;
+  globalThis.fetch = async () => { sent++; return Response.json({ ok: true, result: { message_id: 2 } }); };
+  try {
+    await f.tracker.update(message('/start pair-secret'));
+    assert.equal(await f.storage.get('telegramChatId'), 123); assert.equal(sent, 1);
+    await f.tracker.update(message('STOP', 999));
+    assert.equal(await f.storage.get('paused'), undefined);
+    await f.tracker.update(message('STOP'));
+    assert.equal(await f.storage.get('paused'), true);
+  } finally { globalThis.fetch = original; }
+});
+
+test('unpaired tracker does not send or create a daily record', async () => {
+  const f = fixture(); await f.storage.put('telegramChatId', undefined);
+  await f.tracker.tick({ date: '2026-10-13', due: true });
+  assert.equal(await f.storage.get('day:2026-10-13'), undefined);
+});
+
+test('statistics support combinations and deduplicate repeated updates', async () => {
+  const f = fixture(); const original = globalThis.fetch; const texts = [];
+  f.tracker.sheets.rows = async () => [[sheetSerial('2026-01-01'), 'Yes', 'No', 'Yes', '', '', '', 'Complete']];
+  globalThis.fetch = async (url, init) => { texts.push(JSON.parse(init.body).text); return Response.json({ ok: true, result: { message_id: 2 } }); };
+  const update = { update_id: 1, message: { message_id: 9, text: '/stats 2026 workout=Yes sober=Yes', chat: { id: 123, type: 'private' }, from: { id: 123 } } };
+  try {
+    await f.tracker.update(update); await f.tracker.update(update);
+    assert.equal(texts.length, 1); assert.match(texts[0], /1 completed days/);
+    await f.tracker.update({...update, message: {...update.message, message_id: 10, text: '/stats 2026'}});
+    assert.match(texts[1], /Sober: 1/); assert.match(texts[1], /All three: 0/);
+  } finally { globalThis.fetch = original; }
 });
 
 test('disabled or wrong-time schedule never sends', async () => {

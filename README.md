@@ -1,6 +1,6 @@
 # Simple Daily Health Tracker
 
-One daily text. One reply. Three habits tracked in your own Google Sheet.
+One daily Telegram message. One reply. Three habits in your private Google Sheet.
 
 ```text
 Daily check-in 2026-10-13
@@ -10,67 +10,63 @@ Daily check-in 2026-10-13
 Reply Y Y N (in order; Y=yes, N=no). STOP to pause.
 ```
 
-Reply `Y Y N` or `yes yes no`. The order is **workout, eat clean, sober**.
-The application sends no confirmation text. Twilio may send required STOP/START notices.
-An invalid reply is marked in the Sheet; send a corrected three-answer reply to fix it.
+Reply `Y Y N` or `yes yes no`, in order: **workout, eat clean, sober**. Valid daily answers do not generate a confirmation message. Missing answers stay blank, never No. An invalid reply is marked in the Sheet; send a corrected reply to fix it.
 
 ## Current setup
 
-- Source code and tests are ready; daily sending is **disabled by default**.
-- The owner's Google Sheet has a **Daily Log** and **Summary** tab.
-- Cloudflare hosting is deployed and its [health check](https://simple-daily-health-tracker.skendall18.workers.dev/health) passes.
-- Google service-account access is configured, and the live tracker can read the owner's Sheet. Its account's write access is also verified.
-- Twilio account credentials are configured. Account billing, a verified sender, and the incoming SMS webhook still need setup before daily texts can be enabled.
-- No live SMS was sent while building this project.
+- Telegram implementation is tested; daily sending remains **disabled** until the bot is configured and privately paired.
+- Existing Google Sheet has **Daily Log** and **Summary** tabs. Its private service-account read/write access is verified.
+- Cloudflare hosting uses the free Workers plan and a SQLite Durable Object.
+- The former SMS implementation has been replaced. This version makes no Twilio calls and needs no phone number, number rental, or carrier registration.
+- A live Telegram round trip still needs verification after account setup.
 
-## Hosting and costs
+## Costs
 
-Cloudflare Workers and SQLite-backed Durable Objects have free tiers sufficient for this small personal tracker.
-Google Sheets and its API can be used without paid hosting. Real SMS is paid.
+At one daily prompt/reply, Telegram bots, Cloudflare hosting, and Google Sheets API fit within their free usage limits. No paid AI API is used. Internet/data access on your phone remains necessary. Provider limits and pricing can change.
 
-As checked on October 13, 2026, Twilio US toll-free numbers cost $2.15/month, with a base SMS rate of $0.0083 per inbound/outbound segment plus carrier fees. At 31 prompts and 31 replies, the base number and message cost is approximately **$2.66/month before carrier fees and taxes**. Budget roughly $3–5/month, subject to provider approval and current pricing. Trial credit is temporary, not permanent free service.
+- [Telegram bot limits](https://core.telegram.org/bots/faq)
+- [Cloudflare pricing](https://developers.cloudflare.com/workers/platform/pricing/)
+- [Google Sheets API usage limits](https://developers.google.com/workspace/sheets/api/limits)
 
-- [Twilio SMS pricing](https://www.twilio.com/en-us/sms/pricing/us)
-- [Toll-free sender approval](https://www.twilio.com/docs/messaging/compliance/toll-free/console-onboarding)
-- [Cloudflare free tier](https://developers.cloudflare.com/workers/platform/pricing/)
+## Setup
 
-A local 10-digit Twilio number also requires A2P registration and may have additional setup/monthly fees. A toll-free sender needs verification before it can send to US numbers; approval is not guaranteed for every use case. Describe this personal, self-requested habit tracker accurately during registration.
+### Telegram
 
-## Activate it
+1. Install Telegram and enable notifications.
+2. Open the official [@BotFather](https://t.me/BotFather), send `/newbot`, and choose a name and available username ending in `bot`.
+3. Keep the bot token private. Never put it in this repository, a GitHub issue, or a chat with an assistant.
+4. Generate separate random secrets for `TELEGRAM_WEBHOOK_SECRET` and `TELEGRAM_PAIRING_CODE`. Use at least 32 random bytes encoded as hexadecimal; the pairing code must contain only letters, digits, `_`, or `-`.
+5. Store these three secrets privately in Cloudflare, following the deployment section.
+6. Call `POST /admin/telegram/connect` with your private admin authorization. It registers the HTTPS `/telegram` webhook for ordinary message updates and discards old pending updates. Do this once during initial setup; repeating it discards pending messages.
+7. In your bot's private chat, send `/start YOUR_PAIRING_CODE`. Only the correct code can bind the first chat; after pairing, other chats are ignored. Keep the code private. Telegram chat IDs are stored privately in Cloudflare.
+8. Check `/admin/status` for `telegramConnected: true`, then enable the schedule. The one-time welcome message confirms pairing.
 
-You need a Twilio account, a Cloudflare account, and a Google account that owns the target Sheet. Never paste credentials into a GitHub issue, commit, or chat.
+Never share the pairing link/code. The bot ignores group chats. There is no public reset or reassignment command; deliberate owner changes require private administrative maintenance.
 
-### 1. Set up Twilio
+### Google Sheet
 
-1. [Create a Twilio account](https://www.twilio.com/try-twilio), add billing, and obtain an SMS-capable US toll-free number.
-2. Complete toll-free verification and wait for approval. Use truthful consent details: the only recipient explicitly requested a daily 9:30 p.m. check-in. Provide the consent evidence and other information Twilio requests; this README does not substitute for the approval process.
-3. Find the Account SID and Auth Token in your Twilio console. Save them privately.
-4. Keep the Twilio number available for the webhook step below.
+Existing installations can reuse their configured Sheet and service account.
 
-### 2. Give the worker access to only the tracker Sheet
+For a new installation, enable Google Sheets API in Google Cloud, create a service account with **no project-wide roles**, create a private JSON key, and share only your tracker Sheet with its `client_email` as Editor. Billing is not required for this tiny API usage. Keep the Sheet private.
 
-1. In [Google Cloud Console](https://console.cloud.google.com/), create/select a project and enable **Google Sheets API**. Billing is not required for this API.
-2. Under **IAM & Admin → Service Accounts**, create a service account. It needs no project-wide IAM role for this tracker.
-3. Create a JSON key for that service account. Keep it private. You will use its `client_email` and `private_key` as Cloudflare secrets.
-4. Open your existing tracker Sheet and share it with that service account's email as **Editor**. Do not make the Sheet public.
-5. Confirm the tabs are named `Daily Log` and `Summary`. The Daily Log columns must be:
+Create a `Daily Log` tab with these columns:
 
 | Column | Value |
 | --- | --- |
-| A | Date (actual Sheets date) |
+| A | Date, an actual Sheets date |
 | B | Workout: Yes / No / blank |
 | C | Ate clean: Yes / No / blank |
 | D | Sober: Yes / No / blank |
 | E | Prompt timestamp, UTC |
-| F | Response timestamp, UTC |
-| G | Inbound SMS message ID |
+| F | Answer timestamp, UTC |
+| G | Telegram reply message ID |
 | H | Status |
 
-If installing this open-source project into a different Sheet, create those columns and copy the Summary formulas from `docs/summary-formulas.md`. Keep health data outside the repository.
+Copy the reporting formulas from [docs/summary-formulas.md](docs/summary-formulas.md) into a `Summary` tab.
 
-### 3. Deploy to Cloudflare
+### Cloudflare deployment
 
-Install Node.js 22 or later and pnpm, then clone this repository and run:
+Use Node.js 22 or later and pnpm:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -79,86 +75,65 @@ pnpm exec wrangler login
 pnpm exec wrangler deploy
 ```
 
-Use the Workers Free plan and leave `ENABLED` set to `false` in `wrangler.jsonc` until setup is complete.
-The configuration creates a SQLite-backed Durable Object, supported on the Free plan.
+Leave `ENABLED=false` until the webhook is configured and the owner chat paired. Store each secret with `pnpm exec wrangler secret put NAME`, entering the value at its private prompt, or use Settings → Variables and Secrets in Cloudflare and select **Secret**.
 
-Set each secret with `pnpm exec wrangler secret put NAME`, entering the value at the prompt:
-
-| Secret | What to enter |
+| Secret | Value |
 | --- | --- |
-| `RECIPIENT_PHONE` | Your phone number in E.164 format (`+1` followed by ten digits) |
-| `TWILIO_ACCOUNT_SID` | Your Twilio Account SID |
-| `TWILIO_AUTH_TOKEN` | Your Twilio Auth Token |
-| `TWILIO_PHONE_NUMBER` | Your verified toll-free sender, E.164 format |
-| `SHEET_ID` | The ID between `/d/` and `/edit` in your Sheet URL |
-| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | `client_email` from the private Google key |
-| `GOOGLE_PRIVATE_KEY` | Complete `private_key`, including PEM header/footer; literal `\n` escapes are accepted |
-| `PUBLIC_URL` | The exact HTTPS worker URL printed by deployment, without a trailing slash |
-| `ADMIN_TOKEN` | A long random secret for private status/statistics endpoints |
+| `TELEGRAM_BOT_TOKEN` | BotFather's private token |
+| `TELEGRAM_WEBHOOK_SECRET` | Random secret authenticating Telegram webhook requests |
+| `TELEGRAM_PAIRING_CODE` | Separate random secret for the first private `/start` |
+| `SHEET_ID` | ID between `/d/` and `/edit` in the Sheet URL |
+| `GOOGLE_SERVICE_ACCOUNT_EMAIL` | Private Google key's `client_email` |
+| `GOOGLE_PRIVATE_KEY` | Complete PEM `private_key`; literal `\n` escapes accepted |
+| `PUBLIC_URL` | Exact HTTPS Worker URL, without trailing slash |
+| `ADMIN_TOKEN` | Long random secret for private administration |
 
-You can also set secrets in the Cloudflare dashboard under the worker's Settings → Variables and Secrets. Mark them as secrets, not plain-text variables.
+`/health` only confirms the Worker responds. `/admin/status` reports pairing, schedule, recent dates, and pending Sheet writes. Administrative requests require `Authorization: Bearer YOUR_ADMIN_TOKEN`.
 
-### 4. Connect Twilio and enable the schedule
+When connected, change `ENABLED` to `true` in `wrangler.jsonc` and deploy again. At the next check-in, reply and verify a single correct dated row in your Sheet. Treat setup as unverified until this live check succeeds. No test health answers are inserted automatically.
 
-1. In the Twilio number's messaging settings, set **A message comes in** to `https://YOUR-WORKER-URL/sms`, method **POST**. Configure the same primary URL for incoming-message retry/fallback if available; the handler deduplicates message IDs.
-2. Check `https://YOUR-WORKER-URL/health`; it should return `{"ok":true}`. This only checks that the worker responds, not that credentials work.
-3. Check `/admin/status` with `Authorization: Bearer YOUR_ADMIN_TOKEN`.
-4. Set `ENABLED` to `true` in `wrangler.jsonc` and deploy again. Cron changes can take up to 15 minutes to propagate. If using dashboard variables instead, remember a future repository deployment can overwrite `ENABLED`.
-5. At the next 9:30 p.m. check-in, reply `Y Y N` and confirm a single dated row appears in the Sheet. Before this live check succeeds, treat installation as unverified.
+## Schedule and replies
 
-Delivery status callbacks are included automatically on outgoing messages and validated at `/sms/status`. Twilio sender approval must be complete before enabling.
+The default is **9:30 pm America/Detroit**, including daylight saving time. Two UTC cron triggers run, and only the invocation matching 21:30 locally sends. Duplicate invocations claim each day once in durable storage. For fixed EST all year instead, use `TIME_ZONE=Etc/GMT+5`. Changing check-in time also requires updating UTC cron expressions.
 
-## Schedule
+Delivery depends on Cloudflare, Telegram, your network, and phone notification settings; exact-second delivery is not guaranteed.
 
-The default is **9:30 p.m. America/Detroit**, including daylight saving time. It runs at 01:30 UTC during EDT and 02:30 UTC during EST. Both UTC triggers run; only the one matching 21:30 locally sends. Duplicate invocations claim the same day once in durable storage.
+- Reply with exactly three Y/N or yes/no values, separated by spaces, commas, or slashes.
+- After-midnight replies apply to the most recent prompt.
+- Another valid reply corrects that day's row until a newer prompt exists.
+- Correct an older prompted day with `2026-10-12 Y N Y`.
+- Undated replies more than 48 hours after the latest prompt are ignored; use a date for older corrections.
+- `STOP` or `/stop` pauses; `START` or `/start` resumes. No catch-up prompt is sent.
 
-If you actually want fixed EST (UTC−5) throughout the year, set `TIME_ZONE` to `Etc/GMT+5` instead. If changing `CHECKIN_TIME`, update the UTC cron expressions too.
+## Progress counts
 
-The scheduled time is a target, not a guarantee of phone delivery at the exact second. Cloudflare, Twilio, carrier outages, and phone connectivity can cause delay or non-delivery.
-
-## Replies and corrections
-
-- Reply with exactly three `Y/N` or `yes/no` values separated by spaces, commas, or slashes.
-- A reply after midnight applies to the most recent prompt, not automatically to the new calendar day.
-- Another valid reply updates that prompt's row until a newer prompt exists.
-- Correct an older prompted date with `2026-10-12 Y N Y`.
-- Unprefixed replies older than 48 hours after the latest prompt are ignored; use an explicit previously prompted date for older corrections.
-- Missing replies leave answers blank. They are never treated as three No answers.
-- `STOP` pauses future prompts; `START` resumes future prompts. These do not send a catch-up prompt.
-
-## Ask about your progress
-
-Use the Sheet's **Summary** tab. Change the year in B1 to see any recorded year.
-It counts workout days, clean-eating days, sober days, each pair, and all three on the same day.
-For other combinations, set B13:B15 to `Yes`, `No`, or `Any`; B16 counts the matching completed days.
-You can also ask an assistant with access to the Sheet to answer questions from the Daily Log. No paid AI API is required.
-
-Private API examples:
+Send `/stats` for the current year's answered, workout, clean-eating, sober, and all-three counts. To select another year or any combination:
 
 ```text
-GET /admin/stats?year=2026&sober=Yes
-GET /admin/stats?year=2026&workout=Yes&clean=Yes&sober=Yes
-GET /admin/stats?year=2026&workout=No&sober=Yes
+/stats 2026
+/stats 2026 sober=Yes
+/stats 2026 workout=Yes clean=Yes sober=Yes
+/stats 2026 workout=No sober=Yes
 ```
 
-All require `Authorization: Bearer YOUR_ADMIN_TOKEN`. Filters are case-sensitive `Yes` or `No`; omit a filter for Any. This API returns counts, not a natural-language SMS chat.
+Filters accept case-sensitive `Yes` or `No`; omit a habit for Any. These commands are optional and receive a statistics response. The daily answer itself receives no extra message.
+
+The Sheet's Summary tab also counts all positive combinations. Change year B1 or set B13:B15 to Yes, No, or Any for a custom count. No paid AI is necessary. An assistant with access to your Sheet can answer natural-language questions from its records.
+
+Private HTTP equivalents are `/admin/stats?year=2026&sober=Yes` and `/admin/stats?year=2026&workout=Yes&clean=Yes&sober=Yes`.
 
 ## Reliability and privacy
 
-The Sheet is the reporting database. Cloudflare keeps a durable backup of prompts/answers and a queue of pending Sheet writes. Signed Twilio webhooks, exact sender/recipient checks, and duplicate message-ID checks protect incoming data.
+Telegram webhooks require the secret header; only the privately paired owner chat can record answers or request statistics. Message IDs deduplicate retries. Credentials and health data stay outside GitHub.
 
-Google Sheets failures do not discard an accepted reply: writes retry after 5 minutes, then every 30 minutes while failures continue. `POST /admin/sync` can retry immediately. `/admin/status` shows recent states and pending writes without revealing your answers.
+The Sheet is the reporting database. Cloudflare keeps prompts/answers and pending Sheet writes in durable storage. Sheet outages retry after 5 minutes, then every 30 minutes; `POST /admin/sync` retries immediately.
 
-The application prioritizes **no duplicate daily SMS**. A failed or ambiguous send is marked `Send failed` or `Send uncertain` and is not automatically resent; this means an outage can cause a missed prompt. Twilio can report later delivery failure through its signed callback. There is no exactly-once delivery guarantee across external SMS networks.
+The application prioritizes avoiding duplicate prompts. Ambiguous or rejected send attempts are marked `Send uncertain` and not automatically retried. This can cause a missed check-in during an outage. Telegram accepting a message does not confirm you saw its notification.
 
-Health answers pass through your carrier, Twilio, Cloudflare, and Google. The app avoids logging your answers or full message bodies. Keep the Sheet private and treat Cloudflare storage and provider accounts as sensitive. Editing a Sheet row manually is not mirrored into the Cloudflare backup; a later SMS correction for that same date may replace that row. Deleting Sheet rows alone does not erase the durable backup.
+Answers pass through Telegram, Cloudflare, and Google. Telegram bot chats are not end-to-end encrypted. The app avoids logging answers, tokens, or message bodies. Manual Sheet edits are not copied into the durable backup; a later reply correction can overwrite that row. Deleting Sheet rows alone does not erase the backup.
 
-## Development
+## Development and repository
 
-Copy `.dev.vars.example` to `.dev.vars` for local-only settings. Keep `ENABLED=false` unless deliberately testing with your real sender. `pnpm test` runs dependency-free tests with mocked provider calls. `pnpm check` verifies the deployment bundle without publishing.
+Copy `.dev.vars.example` to `.dev.vars` for local development. Keep real secrets private. `pnpm test` uses mocked providers and `pnpm check` validates a deployment bundle. GitHub Actions runs tests on pushes and pull requests; deployment is manual.
 
-GitHub Actions runs tests on every push and pull request. Production deployment is manual until accounts and credentials are configured.
-
-## License and repository visibility
-
-MIT licensed. This license permits reuse and modification. If your GitHub repository is private, make it public in GitHub settings when you want others to access the open-source code; do not publish credentials, phone numbers, or health records.
+The repository is public and MIT licensed. Never publish health records or credentials.

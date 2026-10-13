@@ -1,8 +1,7 @@
-# Copy to .dev.vars for local development only. Never commit real values.
-RECIPIENT_PHONE="+15555550123"
-TWILIO_ACCOUNT_SID="AC..."
-TWILIO_AUTH_TOKEN="replace-me"
-TWILIO_PHONE_NUMBER="+15555550124"
+# Local development only; never commit real values.
+TELEGRAM_BOT_TOKEN="replace-with-private-bot-token"
+TELEGRAM_WEBHOOK_SECRET="replace-with-random-secret"
+TELEGRAM_PAIRING_CODE="replace-with-separate-random-code"
 SHEET_ID="replace-with-your-sheet-id"
 GOOGLE_SERVICE_ACCOUNT_EMAIL="tracker@your-project.iam.gserviceaccount.com"
 GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"

@@ -7,14 +7,6 @@ export function constantEqual(a, b) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) diff |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
   return diff === 0;
 }
-export async function twilioSignature(url, params, token) {
-  let input = url;
-  for (const key of [...new Set(params.keys())].sort()) {
-    for (const value of [...new Set(params.getAll(key))].sort()) input += key + value;
-  }
-  const key = await crypto.subtle.importKey('raw', encoder.encode(token), { name: 'HMAC', hash: 'SHA-1' }, false, ['sign']);
-  return base64(await crypto.subtle.sign('HMAC', key, encoder.encode(input)));
-}
 export async function serviceAssertion(email, pem, now = Date.now()) {
   const issued = Math.floor(now / 1000);
   const head = base64url(encoder.encode(JSON.stringify({ alg: 'RS256', typ: 'JWT' })));
