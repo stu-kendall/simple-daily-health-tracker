@@ -43,7 +43,9 @@ export default {
         const filters = Object.fromEntries(['workout', 'clean', 'sober'].map(k => [k, url.searchParams.get(k)]));
         if (Object.values(filters).some(x => x && !['Yes', 'No'].includes(x))) return json({ error: 'Filters must be Yes or No' }, 400);
         try { return json({ year: Number(year), filters, days: countRows(await new Sheets(env).rows(), year, filters) }); }
-        catch { return json({ error: 'Could not read Google Sheets' }, 503); }
+        catch (error) {
+          return json({ error: 'Could not read Google Sheets', reason: error.message }, 503);
+        }
       }
       if (url.pathname === '/admin/status' && request.method === 'GET') return stub(env).fetch('https://internal/status');
       if (url.pathname === '/admin/sync' && request.method === 'POST') return stub(env).fetch('https://internal/sync', { method: 'POST' });

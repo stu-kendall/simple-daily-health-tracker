@@ -187,3 +187,16 @@ test('disabled or wrong-time schedule never sends', async () => {
   await f.tracker.tick({ date: '2026-10-13', due: true });
   assert.equal(await f.storage.get('day:2026-10-13'), undefined);
 });
+
+test('default Sheets fetch retains the global receiver required by Cloudflare', async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async function () {
+    assert.equal(this, globalThis);
+    return Response.json({ values: [] });
+  };
+  try {
+    const sheets = new Sheets({ SHEET_ID: 'test', SHEET_TAB: 'Daily Log' });
+    sheets.token = async () => 'test';
+    assert.deepEqual(await sheets.rows(), []);
+  } finally { globalThis.fetch = original; }
+});

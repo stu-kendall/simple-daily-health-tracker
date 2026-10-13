@@ -2,7 +2,7 @@ import { serviceAssertion } from './security.js';
 import { sheetSerial } from './core.js';
 
 export class Sheets {
-  constructor(env, fetcher = fetch) { this.env = env; this.fetcher = fetcher; }
+  constructor(env, fetcher = fetch.bind(globalThis)) { this.env = env; this.fetcher = fetcher; }
   async token() {
     if (this.cached && this.expires > Date.now()) return this.cached;
     const assertion = await serviceAssertion(this.env.GOOGLE_SERVICE_ACCOUNT_EMAIL, this.env.GOOGLE_PRIVATE_KEY);

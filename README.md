@@ -19,7 +19,8 @@ An invalid reply is marked in the Sheet; send a corrected three-answer reply to 
 - Source code and tests are ready; daily sending is **disabled by default**.
 - The owner's Google Sheet has a **Daily Log** and **Summary** tab.
 - Cloudflare hosting is deployed and its [health check](https://simple-daily-health-tracker.skendall18.workers.dev/health) passes.
-- SMS credentials, a verified sender, and Google service-account access still need configuration.
+- Google service-account access is configured, and the live tracker can read the owner's Sheet. Its account's write access is also verified.
+- Twilio account credentials are configured. Account billing, a verified sender, and the incoming SMS webhook still need setup before daily texts can be enabled.
 - No live SMS was sent while building this project.
 
 ## Hosting and costs
