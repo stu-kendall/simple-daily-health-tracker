@@ -18,7 +18,8 @@ An invalid reply is marked in the Sheet; send a corrected three-answer reply to 
 
 - Source code and tests are ready; daily sending is **disabled by default**.
 - The owner's Google Sheet has a **Daily Log** and **Summary** tab.
-- Hosting, SMS credentials, a verified sender, and Google service-account access still need configuration.
+- Cloudflare hosting is deployed and its [health check](https://simple-daily-health-tracker.skendall18.workers.dev/health) passes.
+- SMS credentials, a verified sender, and Google service-account access still need configuration.
 - No live SMS was sent while building this project.
 
 ## Hosting and costs
