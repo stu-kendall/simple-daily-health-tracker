@@ -1,0 +1,10 @@
+# Copy to .dev.vars for local development only. Never commit real values.
+RECIPIENT_PHONE="+15555550123"
+TWILIO_ACCOUNT_SID="AC..."
+TWILIO_AUTH_TOKEN="replace-me"
+TWILIO_PHONE_NUMBER="+15555550124"
+SHEET_ID="replace-with-your-sheet-id"
+GOOGLE_SERVICE_ACCOUNT_EMAIL="tracker@your-project.iam.gserviceaccount.com"
+GOOGLE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+ADMIN_TOKEN="replace-with-a-long-random-secret"
+PUBLIC_URL="https://simple-daily-health-tracker.YOUR-SUBDOMAIN.workers.dev"
