@@ -14,11 +14,11 @@ Reply `Y Y N` or `yes yes no`, in order: **workout, eat clean, sober**. Valid da
 
 ## Current setup
 
-- Telegram implementation is tested; daily sending remains **disabled** until the bot is configured and privately paired.
+- The owner’s [@fred_health_bot](https://t.me/fred_health_bot) is connected and privately paired. Daily check-ins are enabled for 9:30 pm Eastern.
 - Existing Google Sheet has **Daily Log** and **Summary** tabs. Its private service-account read/write access is verified.
 - Cloudflare hosting uses the free Workers plan and a SQLite Durable Object.
 - The former SMS implementation has been replaced. This version makes no Twilio calls and needs no phone number, number rental, or carrier registration.
-- A live Telegram round trip still needs verification after account setup.
+- Live Telegram pairing and the welcome message are verified. The first scheduled check-in/reply will verify the daily answer path into the Sheet.
 
 ## Costs
 
@@ -75,7 +75,7 @@ pnpm exec wrangler login
 pnpm exec wrangler deploy
 ```
 
-Leave `ENABLED=false` until the webhook is configured and the owner chat paired. Store each secret with `pnpm exec wrangler secret put NAME`, entering the value at its private prompt, or use Settings → Variables and Secrets in Cloudflare and select **Secret**.
+For a new installation, change the checked-in `ENABLED=true` to `false` before deploying; leave it disabled until the webhook is configured and the owner chat paired. Store each secret with `pnpm exec wrangler secret put NAME`, entering the value at its private prompt, or use Settings → Variables and Secrets in Cloudflare and select **Secret**.
 
 | Secret | Value |
 | --- | --- |

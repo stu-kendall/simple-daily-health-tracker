@@ -8,7 +8,7 @@
     "TIME_ZONE": "America/Detroit",
     "CHECKIN_TIME": "21:30",
     "SHEET_TAB": "Daily Log",
-    "ENABLED": "false"
+    "ENABLED": "true"
   },
   "triggers": { "crons": ["30 1,2 * * *"] },
   "durable_objects": {
