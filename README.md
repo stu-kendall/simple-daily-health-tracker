@@ -1,20 +1,20 @@
 # Simple Daily Health Tracker
 
-One daily Telegram message. One reply. Three habits in your private Google Sheet.
+One daily Telegram message. One reply. Workouts, clean eating, and drink counts in your private Google Sheet.
 
 ```text
 Daily check-in 2026-10-13
-1) Workout today?
-2) Eat clean today?
-3) Sober today?
-Reply Y Y N (in order; Y=yes, N=no). STOP to pause.
+1) Did you work out today?
+2) Did you eat clean today?
+3) How many drinks did you have today?
+Reply Y N 0 (workout, clean, drinks). STOP to pause.
 ```
 
-Reply `Y Y N` or `yes yes no`, in order: **workout, eat clean, sober**. Valid daily answers do not generate a confirmation message. Missing answers stay blank, never No. An invalid reply is marked in the Sheet; send a corrected reply to fix it.
+Reply `Y N 0` or `yes no 5`, in order: **workout, eat clean, number of drinks**. The first two answers accept uppercase, lowercase, or mixed case. Drinks must be a nonnegative whole number (0, 5, 10, etc.). Use spaces, commas, or slashes between the three answers. Replies without separators such as `YN5` are not accepted. Valid daily answers do not generate a confirmation message. Missing answers stay blank, never No or zero. Only a recorded zero means an alcohol-free day. An invalid reply is marked in the Sheet; send a corrected reply to fix it.
 
 ## Current setup
 
-- The owner’s [@fred_health_bot](https://t.me/fred_health_bot) is connected and privately paired. Daily check-ins are enabled for 9:30 pm Eastern.
+- The owner’s [@fred_health_bot](https://t.me/fred_health_bot) is connected and privately paired. Daily check-ins are enabled for 9:30 pm Eastern. The third question now asks for a numeric drink count; the empty Sheet was migrated on October 13, 2026 without inventing historical counts.
 - Existing Google Sheet has **Daily Log** and **Summary** tabs. Its private service-account read/write access is verified.
 - Cloudflare hosting uses the free Workers plan and a SQLite Durable Object.
 - The former SMS implementation has been replaced. This version makes no Twilio calls and needs no phone number, number rental, or carrier registration.
@@ -56,7 +56,7 @@ Create a `Daily Log` tab with these columns:
 | A | Date, an actual Sheets date |
 | B | Workout: Yes / No / blank |
 | C | Ate clean: Yes / No / blank |
-| D | Sober: Yes / No / blank |
+| D | Drinks: nonnegative whole number / blank |
 | E | Prompt timestamp, UTC |
 | F | Answer timestamp, UTC |
 | G | Telegram reply message ID |
@@ -98,29 +98,29 @@ The default is **9:30 pm America/Detroit**, including daylight saving time. Two 
 
 Delivery depends on Cloudflare, Telegram, your network, and phone notification settings; exact-second delivery is not guaranteed.
 
-- Reply with exactly three Y/N or yes/no values, separated by spaces, commas, or slashes.
+- Reply with two Y/N or yes/no values followed by a whole drink count, separated by spaces, commas, or slashes. Example: `y N 10`. Negative numbers, fractions, and a yes/no third answer are rejected.
 - After-midnight replies apply to the most recent prompt.
 - Another valid reply corrects that day's row until a newer prompt exists.
-- Correct an older prompted day with `2026-10-12 Y N Y`.
+- Correct an older prompted day with `2026-10-12 Y N 0`.
 - Undated replies more than 48 hours after the latest prompt are ignored; use a date for older corrections.
 - `STOP` or `/stop` pauses; `START` or `/start` resumes. No catch-up prompt is sent.
 
 ## Progress counts
 
-Send `/stats` for the current year's answered, workout, clean-eating, sober, and all-three counts. To select another year or any combination:
+Send `/stats` for the current year's answered, workout, clean-eating, alcohol-free, workout + clean + zero-drinks days, and total drinks. To select another year or any combination:
 
 ```text
 /stats 2026
-/stats 2026 sober=Yes
-/stats 2026 workout=Yes clean=Yes sober=Yes
-/stats 2026 workout=No sober=Yes
+/stats 2026 drinks=0
+/stats 2026 workout=Yes clean=Yes drinks=0
+/stats 2026 workout=No drinks=0
 ```
 
-Filters accept case-sensitive `Yes` or `No`; omit a habit for Any. These commands are optional and receive a statistics response. The daily answer itself receives no extra message.
+Workout and clean filters accept case-sensitive `Yes` or `No`; drinks accepts an exact nonnegative whole number, including `0`. Omit a filter for Any. Legacy sobriety filters still work: sober=Yes means zero drinks; sober=No means greater than zero. Missing counts never match either. These commands are optional and receive a statistics response. The daily answer itself receives no extra message.
 
-The Sheet's Summary tab also counts all positive combinations. Change year B1 or set B13:B15 to Yes, No, or Any for a custom count. No paid AI is necessary. An assistant with access to your Sheet can answer natural-language questions from its records.
+The Sheet's Summary tab counts workout/clean-eating combinations with zero drinks, total drinks, and days with drinks. Change year B1; set B13:B14 to Yes, No, or Any and B15 to an exact drink count or Any for a custom count. No paid AI is necessary. An assistant with access to your Sheet can answer natural-language questions from its records.
 
-Private HTTP equivalents are `/admin/stats?year=2026&sober=Yes` and `/admin/stats?year=2026&workout=Yes&clean=Yes&sober=Yes`.
+Private HTTP equivalents are `/admin/stats?year=2026&drinks=0` and `/admin/stats?year=2026&workout=Yes&clean=Yes&drinks=0`.
 
 ## Reliability and privacy
 

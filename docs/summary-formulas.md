@@ -1,6 +1,8 @@
 # Summary formulas
 
-Create a Summary tab and enter the following cells. Daily Log dates must be actual numeric Sheet dates, with Yes/No strings in B:D and Complete in H for answered days. The owner's Sheet is already prepared.
+Daily Log: A date, B workout Yes/No, C clean Yes/No, D drinks (whole number >= 0), E-G timestamps/message ID, H status. Blank counts are unknown. Only numeric zero means alcohol-free.
+
+Set the following cells in Summary:
 
 **A1**
 
@@ -23,7 +25,7 @@ Metric
 **B2**
 
 ```text
-Days
+Value
 ```
 
 **A3**
@@ -65,13 +67,13 @@ Ate clean
 **A6**
 
 ```text
-Sober
+Alcohol-free (0 drinks)
 ```
 
 **B6**
 
 ```text
-=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!D2:D,"Yes")
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!D2:D,0,'Daily Log'!D2:D,"<>")
 ```
 
 **A7**
@@ -89,38 +91,40 @@ Workout + clean
 **A8**
 
 ```text
-Workout + sober
+Workout + 0 drinks
 ```
 
 **B8**
 
 ```text
-=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,"Yes",'Daily Log'!D2:D,"Yes")
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,"Yes",'Daily Log'!D2:D,0,'Daily Log'!D2:D,"<>")
 ```
 
 **A9**
 
 ```text
-Clean + sober
+Clean + 0 drinks
 ```
 
 **B9**
 
 ```text
-=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!C2:C,"Yes",'Daily Log'!D2:D,"Yes")
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!C2:C,"Yes",'Daily Log'!D2:D,0,'Daily Log'!D2:D,"<>")
 ```
 
 **A10**
 
 ```text
-All three
+Workout + clean + 0 drinks
 ```
 
 **B10**
 
 ```text
-=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,"Yes",'Daily Log'!C2:C,"Yes",'Daily Log'!D2:D,"Yes")
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,"Yes",'Daily Log'!C2:C,"Yes",'Daily Log'!D2:D,0,'Daily Log'!D2:D,"<>")
 ```
+
+
 
 **A12**
 
@@ -131,7 +135,7 @@ Custom combination
 **B12**
 
 ```text
-Choose Any, Yes or No
+Yes/No/Any; drinks: count/Any
 ```
 
 **A13**
@@ -161,7 +165,7 @@ Any
 **A15**
 
 ```text
-Sober
+Drinks (exact count)
 ```
 
 **B15**
@@ -179,19 +183,45 @@ Matching days
 **B16**
 
 ```text
-=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,IF(B13="Any","<>",B13),'Daily Log'!C2:C,IF(B14="Any","<>",B14),'Daily Log'!D2:D,IF(B15="Any","<>",B15))
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!B2:B,IF(B13="Any","<>",B13),'Daily Log'!C2:C,IF(B14="Any","<>",B14),'Daily Log'!D2:D,IF(B15="Any",">=0",B15),'Daily Log'!D2:D,"<>")
+```
+
+**A17**
+
+```text
+Total drinks
+```
+
+**B17**
+
+```text
+=SUMIFS('Daily Log'!D2:D,'Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete")
 ```
 
 **A18**
 
 ```text
-Unanswered days have blank answers.
+Days with drinks
 ```
 
 **B18**
 
 ```text
-They are never counted as No.
+=COUNTIFS('Daily Log'!A2:A,">="&DATE(B1,1,1),'Daily Log'!A2:A,"<"&DATE(B1+1,1,1),'Daily Log'!H2:H,"Complete",'Daily Log'!D2:D,">0")
 ```
 
-Set B13:B15 validation to the choices Any, Yes, No. B1 can be changed to a past year.
+
+
+**A20**
+
+```text
+Blank counts are unknown
+```
+
+**B20**
+
+```text
+Only 0 means alcohol-free.
+```
+
+Validation: B13:B14 offer Any/Yes/No; B15 permits Any or a nonnegative whole number. Daily Log D2:D permits blanks or nonnegative whole numbers.

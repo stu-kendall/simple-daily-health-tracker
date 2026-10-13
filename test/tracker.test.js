@@ -2,15 +2,15 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { generateKeyPairSync, verify } from 'node:crypto';
 import worker, { Tracker } from '../src/worker.js';
-import { parseReply, localParts, prompt, replyDate, countRows, sheetSerial } from '../src/core.js';
+import { parseReply, localParts, prompt, replyDate, countRows, sheetSerial, drinkStats, parseFilters } from '../src/core.js';
 import { serviceAssertion } from '../src/security.js';
 import { Sheets } from '../src/sheets.js';
 
-test('accept exactly three yes/no answers and optional valid correction date', () => {
-  assert.deepEqual(parseReply('Y y N').answers, ['Yes', 'Yes', 'No']);
-  assert.deepEqual(parseReply('yes,no/yes').answers, ['Yes', 'No', 'Yes']);
-  assert.equal(parseReply('2026-10-12 yes yes no').date, '2026-10-12');
-  for (const text of ['yes', 'yes no', 'yes no yes no', 'maybe yes no', '2026-02-30 y y n', '']) assert.equal(parseReply(text), null);
+test('accept two case-insensitive yes/no answers, whole drink count and optional date', () => {
+  assert.deepEqual(parseReply('Y y 0').answers, ['Yes', 'Yes', 0]);
+  assert.deepEqual(parseReply('yes,no/10').answers, ['Yes', 'No', 10]);
+  assert.equal(parseReply('2026-10-12 yes yes 5').date, '2026-10-12');
+  for (const text of ['yes', 'yes no', 'yes no yes no', 'maybe yes no', '2026-02-30 y y 0', 'Y Y N', 'Y N -1', 'Y N 1.5', 'Y N NaN', 'Y N Infinity', 'Y N 9007199254740992', 'YY0', '']) assert.equal(parseReply(text), null);
 });
 
 test('9:30 pm Detroit scheduling in winter, summer and DST transition evenings', () => {
@@ -24,13 +24,14 @@ test('9:30 pm Detroit scheduling in winter, summer and DST transition evenings',
 
 test('daily prompt keeps all three questions and one reply instruction', () => {
   const text = prompt('2026-10-13');
-  assert.ok(text.length <= 160);
+  assert.match(text, /How many drinks did you have today/);
+  assert.match(text, /Reply Y N 0/);
   assert.match(text, /^[\x00-\x7f]*$/);
 });
 
 test('after-midnight replies and same-day corrections use most recent prompt', () => {
   const records = {
-    '2026-10-12': { date: '2026-10-12', promptedAt: '2026-10-13T01:30:00Z', answers: ['Yes', 'No', 'Yes'] },
+    '2026-10-12': { date: '2026-10-12', promptedAt: '2026-10-13T01:30:00Z', answers: ['Yes', 'No', 0] },
     '2026-10-13': { date: '2026-10-13', promptedAt: '2026-10-14T01:30:00Z' },
   };
   assert.equal(replyDate({}, records, Date.parse('2026-10-13T05:00:00Z')), '2026-10-12');
@@ -41,14 +42,14 @@ test('after-midnight replies and same-day corrections use most recent prompt', (
 
 test('annual counts support all habit combinations and exclude unanswered days', () => {
   const rows = [
-    [sheetSerial('2026-01-01'), 'Yes', 'Yes', 'Yes', '', '', '', 'Complete'],
-    [sheetSerial('2026-01-02'), 'No', 'Yes', 'Yes', '', '', '', 'Complete'],
+    [sheetSerial('2026-01-01'), 'Yes', 'Yes', 0, '', '', '', 'Complete'],
+    [sheetSerial('2026-01-02'), 'No', 'Yes', 5, '', '', '', 'Complete'],
     [sheetSerial('2026-01-03'), '', '', '', '', '', '', 'Awaiting response'],
-    [sheetSerial('2025-12-31'), 'Yes', 'Yes', 'Yes', '', '', '', 'Complete'],
+    [sheetSerial('2025-12-31'), 'Yes', 'Yes', 0, '', '', '', 'Complete'],
   ];
-  assert.equal(countRows(rows, 2026, { sober: 'Yes' }), 2);
+  assert.equal(countRows(rows, 2026, { sober: 'Yes' }), 1);
   assert.equal(countRows(rows, 2026, { workout: 'Yes', clean: 'Yes', sober: 'Yes' }), 1);
-  assert.equal(countRows(rows, 2026, { workout: 'No', sober: 'Yes' }), 1);
+  assert.equal(countRows(rows, 2026, { workout: 'No', sober: 'No' }), 1);
   assert.equal(countRows(rows, 2026), 2);
 });
 
@@ -102,16 +103,16 @@ test('daily send claims survive restart and duplicate concurrent ticks send once
 test('replies survive Sheet outage, retry once, and allow correction without duplicate rows', async () => {
   const f = fixture();
   await f.storage.put('day:2026-10-13', { date: '2026-10-13', promptedAt: '2026-10-14T01:30:00Z', status: 'Awaiting response' });
-  const input = { body: 'Y Y N', id: 'TG:123:1', now: Date.parse('2026-10-14T05:00:00Z') };
+  const input = { body: 'Y Y 5', id: 'TG:123:1', now: Date.parse('2026-10-14T05:00:00Z') };
   await f.tracker.reply(input);
   f.tracker.sheets.upsert = async () => { throw new Error('outage'); };
   await f.tracker.alarm(); assert.ok(f.alarm);
-  assert.deepEqual((await f.storage.get('day:2026-10-13')).answers, ['Yes', 'Yes', 'No']);
+  assert.deepEqual((await f.storage.get('day:2026-10-13')).answers, ['Yes', 'Yes', 5]);
   f.tracker.sheets.upsert = async r => f.writes.push(structuredClone(r));
   await f.tracker.reply(input); await f.tracker.sync();
   assert.equal(f.writes.length, 1); assert.equal(f.alarm, undefined);
-  await f.tracker.reply({ ...input, body: 'Y N Y', id: 'TG:123:2' }); await f.tracker.sync();
-  assert.deepEqual(f.writes[1].answers, ['Yes', 'No', 'Yes']);
+  await f.tracker.reply({ ...input, body: 'Y N 0', id: 'TG:123:2' }); await f.tracker.sync();
+  assert.deepEqual(f.writes[1].answers, ['Yes', 'No', 0]);
 });
 
 test('invalid replies preserve previous valid answers; STOP pauses future sends', async () => {
@@ -119,7 +120,7 @@ test('invalid replies preserve previous valid answers; STOP pauses future sends'
   await f.storage.put(`day:${date}`, { date, promptedAt: '2026-10-14T01:30:00Z', status: 'Awaiting response' });
   await f.tracker.reply({ body: 'maybe', id: 'TG:123:1', now });
   assert.equal((await f.storage.get(`day:${date}`)).status, 'Invalid response');
-  await f.tracker.reply({ body: 'yes no yes', id: 'TG:123:2', now });
+  await f.tracker.reply({ body: 'yes no 0', id: 'TG:123:2', now });
   await f.tracker.reply({ body: 'bad reply', id: 'TG:123:3', now });
   assert.equal((await f.storage.get(`day:${date}`)).status, 'Complete');
   await f.tracker.reply({ body: 'STOP', id: 'TG:123:4', now });
@@ -144,7 +145,7 @@ test('Sheet upsert updates existing date and appends new date using RAW values',
     requests.push({ url, init }); return Response.json(init.method ? {} : { values: [[sheetSerial('2026-10-13')]] });
   });
   sheets.token = async () => 'test';
-  await sheets.upsert({ date: '2026-10-13', answers: ['Yes', 'No', 'Yes'], status: 'Complete' });
+  await sheets.upsert({ date: '2026-10-13', answers: ['Yes', 'No', 0], status: 'Complete' });
   assert.equal(requests[1].init.method, 'PUT');
   assert.match(decodeURIComponent(requests[1].url), /A2:H2/);
   await sheets.upsert({ date: '2026-10-14', status: 'Awaiting response' });
@@ -156,7 +157,7 @@ test('authenticated webhook forwards update and sends no confirmation message', 
   let forwarded;
   const env = { TELEGRAM_WEBHOOK_SECRET: 'test', TRACKER: { idFromName: x => x,
     get: () => ({ fetch: async (url, init) => { forwarded = JSON.parse(init.body); return Response.json({ ok: true }); } }) } };
-  const update = { update_id: 1, message: { text: 'Y Y N' } };
+  const update = { update_id: 1, message: { text: 'Y Y 5' } };
   const response = await worker.fetch(new Request('https://example.com/telegram', { method: 'POST',
     body: JSON.stringify(update), headers: { 'X-Telegram-Bot-Api-Secret-Token': 'test' } }), env);
   assert.deepEqual(await response.json(), { ok: true });
@@ -190,14 +191,14 @@ test('unpaired tracker does not send or create a daily record', async () => {
 
 test('statistics support combinations and deduplicate repeated updates', async () => {
   const f = fixture(); const original = globalThis.fetch; const texts = [];
-  f.tracker.sheets.rows = async () => [[sheetSerial('2026-01-01'), 'Yes', 'No', 'Yes', '', '', '', 'Complete']];
+  f.tracker.sheets.rows = async () => [[sheetSerial('2026-01-01'), 'Yes', 'No', 0, '', '', '', 'Complete']];
   globalThis.fetch = async (url, init) => { texts.push(JSON.parse(init.body).text); return Response.json({ ok: true, result: { message_id: 2 } }); };
-  const update = { update_id: 1, message: { message_id: 9, text: '/stats 2026 workout=Yes sober=Yes', chat: { id: 123, type: 'private' }, from: { id: 123 } } };
+  const update = { update_id: 1, message: { message_id: 9, text: '/stats 2026 workout=Yes drinks=0', chat: { id: 123, type: 'private' }, from: { id: 123 } } };
   try {
     await f.tracker.update(update); await f.tracker.update(update);
     assert.equal(texts.length, 1); assert.match(texts[0], /1 completed days/);
     await f.tracker.update({...update, message: {...update.message, message_id: 10, text: '/stats 2026'}});
-    assert.match(texts[1], /Sober: 1/); assert.match(texts[1], /All three: 0/);
+    assert.match(texts[1], /Alcohol-free \(0 drinks\): 1/); assert.match(texts[1], /Workout \+ clean \+ 0 drinks: 0/);
   } finally { globalThis.fetch = original; }
 });
 
@@ -220,4 +221,21 @@ test('default Sheets fetch retains the global receiver required by Cloudflare', 
     sheets.token = async () => 'test';
     assert.deepEqual(await sheets.rows(), []);
   } finally { globalThis.fetch = original; }
+});
+
+
+test('drink statistics distinguish zero from missing and reject invalid filters', () => {
+  const rows = [
+    [sheetSerial('2026-01-01'), 'Yes', 'Yes', 0, '', '', '', 'Complete'],
+    [sheetSerial('2026-01-02'), 'No', 'Yes', 10, '', '', '', 'Complete'],
+    [sheetSerial('2026-01-03'), 'Yes', 'Yes', '', '', '', '', 'Complete'],
+    [sheetSerial('2026-01-04'), '', '', '', '', '', '', 'Awaiting response'],
+    [sheetSerial('2025-12-31'), 'Yes', 'Yes', 5, '', '', '', 'Complete'],
+  ];
+  assert.equal(countRows(rows, 2026, {drinks:0}), 1);
+  assert.equal(countRows(rows, 2026, {drinks:10, clean:'Yes'}), 1);
+  assert.equal(countRows(rows, 2026, {sober:'No'}), 1);
+  assert.deepEqual(drinkStats(rows, 2026), {daysWithDrinkCounts:2, totalDrinks:10});
+  assert.deepEqual(parseFilters({drinks:'0', workout:'Yes'}), {drinks:0, workout:'Yes'});
+  for (const drinks of ['-1','1.5','Yes','Infinity','9007199254740992']) assert.equal(parseFilters({drinks}), null);
 });

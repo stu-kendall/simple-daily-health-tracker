@@ -13,12 +13,13 @@ export function parseReply(body) {
   const date = dated?.[1];
   if (date && (!Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0, 10) !== date)) return null;
   const tokens = (dated?.[2] ?? text).toLowerCase().split(/[\s,\/]+/);
-  if (tokens.length !== 3 || tokens.some(t => !['y', 'n', 'yes', 'no'].includes(t))) return null;
-  return { date, answers: tokens.map(t => t === 'y' || t === 'yes' ? 'Yes' : 'No') };
+  if (tokens.length !== 3 || tokens.slice(0, 2).some(t => !['y', 'n', 'yes', 'no'].includes(t)) ||
+      !/^\d+$/.test(tokens[2]) || !Number.isSafeInteger(Number(tokens[2]))) return null;
+  return { date, answers: [...tokens.slice(0, 2).map(t => t === 'y' || t === 'yes' ? 'Yes' : 'No'), Number(tokens[2])] };
 }
 
 export function prompt(date) {
-  return `Daily check-in ${date}\n1) Workout today?\n2) Eat clean today?\n3) Sober today?\nReply Y Y N (in order; Y=yes, N=no). STOP to pause.`;
+  return `Daily check-in ${date}\n1) Did you work out today?\n2) Did you eat clean today?\n3) How many drinks did you have today?\nReply Y N 0 (workout, clean, drinks). STOP to pause.`;
 }
 
 export function sheetSerial(date) { return Date.parse(`${date}T00:00:00Z`) / 86400000 + 25569; }
@@ -27,8 +28,28 @@ export function countRows(rows, year, filters = {}) {
   return rows.filter(r => {
     const date = typeof r[0] === 'number' ? new Date((r[0] - 25569) * 86400000).toISOString().slice(0, 10) : r[0];
     return date?.startsWith(`${year}-`) && r[7] === 'Complete' &&
-      ['workout', 'clean', 'sober'].every((key, i) => !filters[key] || r[i + 1] === filters[key]);
+      ['workout', 'clean'].every((key, i) => !filters[key] || r[i + 1] === filters[key]) &&
+      (filters.drinks == null || (validDrinks(r[3]) && r[3] === Number(filters.drinks))) &&
+      (!filters.sober || (validDrinks(r[3]) && (filters.sober === 'Yes' ? r[3] === 0 : r[3] > 0)));
   }).length;
+}
+
+export function validDrinks(value) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0; }
+
+export function drinkStats(rows, year) {
+  const recorded = rows.filter(r => countRows([r], year) && validDrinks(r[3]));
+  return { daysWithDrinkCounts: recorded.length, totalDrinks: recorded.reduce((sum, r) => sum + r[3], 0) };
+}
+
+export function parseFilters(input) {
+  const filters = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (value == null || value === '') continue;
+    if (['workout', 'clean', 'sober'].includes(key) && ['Yes', 'No'].includes(value)) filters[key] = value;
+    else if (key === 'drinks' && /^\d+$/.test(String(value)) && Number.isSafeInteger(Number(value))) filters[key] = Number(value);
+    else return null;
+  }
+  return filters;
 }
 
 export function replyDate(parsed, records, now) {

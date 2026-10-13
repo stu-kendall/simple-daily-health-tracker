@@ -1,4 +1,4 @@
-import { localParts, parseReply, prompt, replyDate, countRows } from './core.js';
+import { localParts, parseReply, prompt, replyDate, countRows, drinkStats, parseFilters } from './core.js';
 import { constantEqual } from './security.js';
 import { Sheets } from './sheets.js';
 import { telegram } from './telegram.js';
@@ -44,9 +44,12 @@ export default {
       if (url.pathname === '/admin/stats' && request.method === 'GET') {
         const year = url.searchParams.get('year') ?? localParts(Date.now(), env.TIME_ZONE).date.slice(0, 4);
         if (!/^\d{4}$/.test(year)) return json({ error: 'Invalid year' }, 400);
-        const filters = Object.fromEntries(['workout', 'clean', 'sober'].map(k => [k, url.searchParams.get(k)]));
-        if (Object.values(filters).some(x => x && !['Yes', 'No'].includes(x))) return json({ error: 'Filters must be Yes or No' }, 400);
-        try { return json({ year: Number(year), filters, days: countRows(await new Sheets(env).rows(), year, filters) }); }
+        const filters = parseFilters(Object.fromEntries(['workout', 'clean', 'sober', 'drinks'].map(k => [k, url.searchParams.get(k)])));
+        if (!filters) return json({ error: 'Habits require Yes/No; drinks requires a nonnegative whole number' }, 400);
+        try {
+          const rows = await new Sheets(env).rows();
+          return json({ year: Number(year), filters, days: countRows(rows, year, filters), ...drinkStats(rows, year) });
+        }
         catch (error) {
           return json({ error: 'Could not read Google Sheets', reason: error.message }, 503);
         }
@@ -172,7 +175,7 @@ export class Tracker {
       if (!this.env.TELEGRAM_PAIRING_CODE || !constantEqual(code, this.env.TELEGRAM_PAIRING_CODE)) return;
       await this.state.storage.put('telegramChatId', message.chat.id);
       await telegram(this.env, 'sendMessage', { chat_id: message.chat.id,
-        text: 'Connected! Your daily check-in arrives at 9:30 pm Eastern. Reply with three answers: workout, eat clean, sober. Example: Y Y N. STOP pauses; START resumes. Use /stats for progress.' });
+        text: 'Connected! Your daily check-in arrives at 9:30 pm Eastern. Reply with three answers: workout, eat clean, drink count. Example: Y N 0. STOP pauses; START resumes. Use /stats for progress.' });
       return;
     }
     if (message.chat.id !== chatId) return;
@@ -182,19 +185,21 @@ export class Tracker {
       if (await this.state.storage.get(key)) return;
       const tokens = text.split(/\s+/);
       const year = tokens[1] ?? localParts(Date.now(), this.env.TIME_ZONE).date.slice(0, 4);
-      const filters = {};
+      const inputFilters = {};
       let valid = /^\d{4}$/.test(year);
       for (const token of tokens.slice(2)) {
-        const match = token.match(/^(workout|clean|sober)=(Yes|No)$/);
-        if (!match || filters[match[1]]) valid = false;
-        else filters[match[1]] = match[2];
+        const match = token.match(/^(workout|clean|sober|drinks)=(.+)$/);
+        if (!match || Object.hasOwn(inputFilters, match[1])) valid = false;
+        else inputFilters[match[1]] = match[2];
       }
-      let response = 'Use /stats, /stats 2026 sober=Yes, or /stats 2026 workout=Yes clean=Yes sober=Yes. Filters accept Yes or No.';
+      const filters = parseFilters(inputFilters);
+      valid = valid && filters !== null;
+      let response = 'Use /stats, /stats 2026 drinks=0, or /stats 2026 workout=Yes clean=Yes drinks=0. Workout/clean accept Yes or No; drinks accepts a whole number (0 or more).';
       if (valid) {
         const rows = await this.sheets.rows();
         response = tokens.length > 2
           ? `${year}: ${countRows(rows, year, filters)} completed days match ${tokens.slice(2).join(', ')}.`
-          : `${year}\nAnswered: ${countRows(rows, year)} days\nWorkout: ${countRows(rows, year, {workout:'Yes'})}\nAte clean: ${countRows(rows, year, {clean:'Yes'})}\nSober: ${countRows(rows, year, {sober:'Yes'})}\nAll three: ${countRows(rows, year, {workout:'Yes',clean:'Yes',sober:'Yes'})}`;
+          : `${year}\nAnswered: ${countRows(rows, year)} days\nWorkout: ${countRows(rows, year, {workout:'Yes'})}\nAte clean: ${countRows(rows, year, {clean:'Yes'})}\nAlcohol-free (0 drinks): ${countRows(rows, year, {drinks:0})}\nWorkout + clean + 0 drinks: ${countRows(rows, year, {workout:'Yes',clean:'Yes',drinks:0})}\nTotal drinks: ${drinkStats(rows, year).totalDrinks}`;
       }
       // Claim before sending so Telegram retries cannot create duplicate statistics messages.
       await this.state.storage.put(key, true);
